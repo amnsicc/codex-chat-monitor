@@ -111,6 +111,17 @@ def select(obj, seq, audit):
             provenance=provenance_data.get('type') if isinstance(provenance_data,dict) else None
             if not isinstance(provenance,str):
                 issue(audit,seq,'unknown_user_content_provenance');continue
+            if 'provenance' in part and part['provenance'] != provenance_data:
+                part_provenance = part['provenance']
+                part_source = part_provenance.get('type') if isinstance(part_provenance, dict) else None
+                audit['issues'].append({
+                    'line': seq,
+                    'position': i,
+                    'reason': 'conflicting_part_provenance',
+                    'metadata_provenance_type': provenance,
+                    'part_provenance_type': part_source if isinstance(part_source, str) else None,
+                })
+                continue
             if provenance in {'context','system','developer','host','environment'}:
                 audit['parts_excluded'].append({'line':seq,'position':i,'reason':'host_provenance'})
                 continue
@@ -118,8 +129,6 @@ def select(obj, seq, audit):
                 issue(audit,seq,'unknown_user_content_provenance'); continue
             if kinds is not None and kinds[i]!='user.text':
                 issue(audit,seq,'user_text_kind_provenance_conflict');continue
-            if 'provenance' in part and part['provenance']!=provenance_data:
-                issue(audit,seq,'conflicting_part_provenance');continue
         elif role=='user' and 'provenance' in part:
             issue(audit,seq,'unsupported_completed_part_provenance');continue
         if part_type not in TEXT_TYPES or not isinstance(part.get('text'),str):
