@@ -22,6 +22,12 @@
       "source_manifest_sha256": "3c06e1ec6a2021f890bbccf04281180245dcb7f087b3a8d36028b9e8779babfd",
       "recorded_batch_date": "20261103",
       "kind": "redacted historical snapshot import, not an original development commit"
+    },
+    {
+      "batch": "stage-02-discovery-scheduler-20261109-01",
+      "source_manifest_sha256": "817cabfa4aaa6872b5fb77376a6aace35cd97568dbf18ccf986e89f7ce701926",
+      "recorded_batch_date": "20261109",
+      "kind": "redacted historical snapshot import, not an original development commit"
     }
   ]
 }
