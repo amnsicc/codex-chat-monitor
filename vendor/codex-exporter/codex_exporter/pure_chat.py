@@ -19,6 +19,27 @@ DESKTOP_TOOLS = {'commandexecution','filechange','extension','imageview','mcptoo
 def issue(audit, seq, reason):
     audit['issues'].append({'line':seq,'reason':reason})
 
+def assistant_visibility(item, completed, seq, audit):
+    """Explicit message metadata table, never an inspection of body keywords."""
+    phase,channel=item.get('phase'),item.get('channel')
+    visible_phase={'commentary','final_answer'}
+    visible_channel={'commentary','final'}
+    internal={'analysis','justify','confidence'}
+    if phase is not None and (not isinstance(phase,str) or phase not in visible_phase|internal):
+        issue(audit,seq,'unsupported_assistant_phase');return False,'unverified_assistant_visibility'
+    if channel is not None and (not isinstance(channel,str) or channel not in visible_channel|internal):
+        issue(audit,seq,'unsupported_assistant_channel');return False,'unverified_assistant_visibility'
+    if phase in internal or channel in internal:
+        if phase in visible_phase or channel in visible_channel:
+            issue(audit,seq,'conflicting_assistant_visibility')
+        return False,'internal_assistant_message'
+    if item.get('recipient') not in (None,'','all'):
+        return False,'internal_assistant_recipient'
+    if completed or phase in visible_phase or channel in visible_channel:
+        return True,'visible_assistant_message'
+    issue(audit,seq,'missing_assistant_visibility')
+    return False,'unverified_assistant_visibility'
+
 def select(obj, seq, audit):
     """Return a structurally verified message for the original classifier."""
     top = obj.get('type')
@@ -44,26 +65,35 @@ def select(obj, seq, audit):
     if not supported:
         issue(audit,seq,'unknown_source_schema')
         return None, 'unverified'
-    if role == 'assistant' and (item.get('channel') in {'analysis','justify','confidence'} or
-            item.get('recipient') not in (None,'','all')):
-        return None, 'internal_assistant_message'
+    if role == 'assistant':
+        visible,reason=assistant_visibility(item,completed,seq,audit)
+        if not visible:return None,reason
     if role not in {'user','assistant'}:
         issue(audit,seq,'unknown_role')
         return None, 'unverified'
     if item.get('truncated') or item.get('is_truncated') or item.get('incomplete'):
         issue(audit,seq,'chat_body_truncated')
     content = item.get('content')
+    inline_text = False
     if not isinstance(content,list):
         if completed and isinstance(item.get('text'),str):
             content = [{'type':'text','text':item['text']}]
+            inline_text = True
         else:
             issue(audit,seq,'unknown_content_structure')
             return None,'unverified'
-    metadata = item.get('internal_chat_message_metadata_passthrough') or {}
+    metadata_present='internal_chat_message_metadata_passthrough' in item
+    metadata = item.get('internal_chat_message_metadata_passthrough',{})
+    if not isinstance(metadata,dict):
+        issue(audit,seq,'invalid_content_provenance_structure');return None,'unverified'
     provenances = metadata.get('content_item_metadata',[])
-    if role == 'user' and not completed and len(provenances) != len(content):
+    check_parts=role=='user' and (not completed or metadata_present)
+    if check_parts and (not isinstance(provenances,list) or len(provenances) != len(content)):
         issue(audit,seq,'missing_user_content_provenance')
         return None, 'unverified'
+    kinds=metadata.get('content_item_kinds')
+    if check_parts and kinds is not None and (not isinstance(kinds,list) or len(kinds)!=len(content)):
+        issue(audit,seq,'invalid_content_kind_mapping');return None,'unverified'
     if role == 'user' and completed and not item.get('client_id'):
         issue(audit,seq,'missing_completed_user_client_provenance')
         return None, 'unverified'
@@ -75,18 +105,33 @@ def select(obj, seq, audit):
         if part_type in ATTACHMENTS:
             audit['parts_excluded'].append({'line':seq,'position':i,'reason':'attachment_body'})
             continue
-        if role == 'user' and not completed:
-            provenance = provenances[i].get('provenance',{}).get('type')
+        if check_parts:
+            md=provenances[i]
+            provenance_data=md.get('provenance',{}) if isinstance(md,dict) else {}
+            provenance=provenance_data.get('type') if isinstance(provenance_data,dict) else None
+            if not isinstance(provenance,str):
+                issue(audit,seq,'unknown_user_content_provenance');continue
             if provenance in {'context','system','developer','host','environment'}:
                 audit['parts_excluded'].append({'line':seq,'position':i,'reason':'host_provenance'})
                 continue
             if provenance != 'user':
                 issue(audit,seq,'unknown_user_content_provenance'); continue
+            if kinds is not None and kinds[i]!='user.text':
+                issue(audit,seq,'user_text_kind_provenance_conflict');continue
+            if 'provenance' in part and part['provenance']!=provenance_data:
+                issue(audit,seq,'conflicting_part_provenance');continue
+        elif role=='user' and 'provenance' in part:
+            issue(audit,seq,'unsupported_completed_part_provenance');continue
         if part_type not in TEXT_TYPES or not isinstance(part.get('text'),str):
             issue(audit,seq,'unknown_text_part'); continue
         if part.get('truncated') or part.get('is_truncated'):
             issue(audit,seq,'chat_part_truncated')
-        chosen.append(part)
+        # The downstream general-purpose walker must see only the verified field.
+        chosen.append({'type':part_type,'text':part['text']})
+        extra=sorted(set(part)-{'type','text','truncated','is_truncated'})
+        if extra:
+            audit.setdefault('fields_excluded',[]).append({'line':seq,'position':i,
+                'fields':extra,'reason':'outside_verified_text_field'})
         positions.append(i)
     if not chosen:
         return None,'no_chat_text'
@@ -98,7 +143,11 @@ def select(obj, seq, audit):
         md = target['internal_chat_message_metadata_passthrough']
         md['content_item_metadata'] = [provenances[i] for i in positions]
         md['content_item_kinds'] = ['user.text'] * len(positions)
-    audit['included'].append({'line':seq,'role':role,'positions':positions})
+    prefix='payload.item' if completed else 'payload'
+    audit['included'].append({'line':seq,'role':role,'positions':positions if not inline_text else [],
+        'content_positions':[f'{prefix}.content[{i}]' for i in positions] if not inline_text else [],
+        'text_fields':[f'{prefix}.content[{i}].text' for i in positions] if not inline_text else [f'{prefix}.text'],
+        'user_representation':('retained_user_text' if not completed else 'completed_user_item') if role=='user' else ''})
     return result,'chat'
 
 def deduplicate(records, audit):

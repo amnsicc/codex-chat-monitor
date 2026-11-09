@@ -1,0 +1,2 @@
+{"type": "session_meta", "timestamp": "2026-11-03T00:00:00Z", "payload": {"id": "acceptance-thread", "cwd": "C:/SyntheticWorkspace\\.tmp\\chat-monitor-stage1-acceptance-20261103-01\\independent\\07-analysis-channel-control\\project", "source": "cli"}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:01Z", "payload": {"type": "message", "id": "a", "role": "assistant", "turn_id": "turn-1", "content": [{"type": "output_text", "text": "HIDDEN"}], "channel": "analysis"}}

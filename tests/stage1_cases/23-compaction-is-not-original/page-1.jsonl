@@ -1,0 +1,4 @@
+{"type": "session_meta", "timestamp": "2026-11-03T00:00:00Z", "payload": {"id": "acceptance-thread", "cwd": "C:/SyntheticWorkspace\\.tmp\\chat-monitor-stage1-acceptance-20261103-01\\independent\\23-compaction-is-not-original\\project", "source": "cli"}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:01Z", "payload": {"type": "message", "id": "u", "role": "user", "turn_id": "turn-1", "content": [{"type": "input_text", "text": "EARLY"}], "internal_chat_message_metadata_passthrough": {"turn_id": "turn-1", "content_item_kinds": ["user.text"], "content_item_metadata": [{"provenance": {"type": "user"}}]}}}
+{"type": "compacted", "payload": {"replacement_history": [{"role": "assistant", "content": "DERIVED_SUMMARY"}]}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:03Z", "payload": {"type": "message", "id": "a", "role": "assistant", "turn_id": "turn-1", "content": [{"type": "output_text", "text": "LATE"}], "channel": "final"}}

@@ -6,6 +6,7 @@ import base64
 import ctypes
 import hashlib
 import importlib.metadata as importlib_metadata
+import io
 import json
 import os
 import re
@@ -843,6 +844,10 @@ def extract_text_parts(
 
 
 def extract_text(value: Any, *, strip: bool, max_line_chars: int, max_repeated_lines: int, json_aware: bool = False) -> str:
+    if _PURE_CHAT and isinstance(value,list):
+        # Pure-chat select has already reduced every part to {type, text}.
+        # Empty/whitespace parts retain their position; do not recurse or strip.
+        return "\n\n".join(part['text'] for part in value)
     parts = extract_text_parts(value, strip=strip, max_line_chars=max_line_chars, max_repeated_lines=max_repeated_lines, json_aware=json_aware)
     if _PURE_CHAT:
         return "\n\n".join(parts)
@@ -1472,7 +1477,7 @@ def classify_record(
         if subtype in {"usermessage", "agentmessage"}:
             text = extract_text(item.get("content") or item.get("text") or item.get("message"),
                 strip=strip, max_line_chars=max_line_chars, max_repeated_lines=max_repeated_lines)
-            if text:
+            if text or _PURE_CHAT:
                 return Record("message", "user" if subtype == "usermessage" else "assistant",
                               text, timestamp, item_type, seq)
         if subtype == "filechange" and include_actions:
@@ -1520,7 +1525,7 @@ def classify_record(
                 max_line_chars=max_line_chars,
                 max_repeated_lines=max_repeated_lines,
             )
-            if text:
+            if text or _PURE_CHAT:
                 return Record("message", item_role, text, timestamp, item_type, seq)
 
         if include_actions and any(h in item_type.lower() for h in ACTION_HINTS):
@@ -1559,7 +1564,7 @@ def classify_record(
             max_line_chars=max_line_chars,
             max_repeated_lines=max_repeated_lines,
         )
-        if text:
+        if text or _PURE_CHAT:
             return Record("message", role, text, timestamp, payload_type or top_type, seq)
 
     if include_actions and any(h in type_blob for h in ACTION_HINTS):
@@ -2405,6 +2410,7 @@ def parse_session(
     strip: bool,
     max_line_chars: int,
     max_repeated_lines: int,
+    source_text: str | None = None,
 ) -> tuple[list[Record], dict[str, Any]]:
     records: list[Record] = []
     meta: dict[str, Any] = {
@@ -2429,7 +2435,9 @@ def parse_session(
     if _PURE_CHAT:
         meta["_pure_audit"] = {"issues": [], "included": [], "excluded": [], "parts_excluded": [], "session_ids": [], "projects": []}
 
-    with open_rollout_text(path) as f:
+    # Optional immutable, strictly decoded snapshot for the pure-chat adapter.
+    # newline="" preserves physical line endings for raw source-line hashes.
+    with (io.StringIO(source_text, newline="") if source_text is not None else open_rollout_text(path)) as f:
         for seq, line in enumerate(f, 1):
             if not line.strip():
                 continue
@@ -2539,7 +2547,7 @@ def parse_session(
                 max_line_chars=max_line_chars,
                 max_repeated_lines=max_repeated_lines,
             )
-            if not rec or not rec.text.strip():
+            if not rec or (not _PURE_CHAT and not rec.text.strip()):
                 reason = known_ignored_reason(obj, include_reasoning_summaries)
                 meta["_ignored_event_types"][key_name] += 1
                 meta["_ignored_event_reasons"][reason] += 1
@@ -2556,6 +2564,14 @@ def parse_session(
             meta["_recognized_event_types"][key_name] += 1
             if _MATERIAL_INTEGRITY:
                 annotate(rec, obj, seq, key_name, current_turn, line)
+                if _PURE_CHAT:
+                    selected_ref = meta['_pure_audit']['included'][-1]
+                    rec.source_refs[0]['content_positions'] = selected_ref['content_positions']
+                    rec.source_refs[0]['text_fields'] = selected_ref['text_fields']
+                    rec.source_refs[0]['timestamp'] = rec.timestamp
+                    # Provenance was checked per selected part, including multiblock text.
+                    rec.real_user_form = selected_ref['user_representation']
+                    rec.source_refs[0]['user_representation'] = rec.real_user_form
                 records.append(rec)
                 continue
             key = (rec.kind, rec.role, rec.text)

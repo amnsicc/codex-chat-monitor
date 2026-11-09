@@ -1,0 +1,4 @@
+{"type": "session_meta", "timestamp": "2026-11-03T00:00:00Z", "payload": {"id": "acceptance-thread", "cwd": "C:/SyntheticWorkspace\\.tmp\\chat-monitor-stage1-acceptance-20261103-01\\independent\\09-overlap-equal-timestamps-forward\\project", "source": "cli"}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:01Z", "payload": {"type": "message", "id": "a", "role": "assistant", "turn_id": "turn-1", "content": [{"type": "output_text", "text": "A"}], "channel": "final"}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:01Z", "payload": {"type": "message", "id": "b", "role": "assistant", "turn_id": "turn-1", "content": [{"type": "output_text", "text": "B"}], "channel": "final"}}
+{"type": "response_item", "timestamp": "2026-11-03T00:00:01Z", "payload": {"type": "message", "id": "c", "role": "assistant", "turn_id": "turn-1", "content": [{"type": "output_text", "text": "C"}], "channel": "final"}}

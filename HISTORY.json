@@ -10,6 +10,12 @@
       "source_manifest_sha256": "9c83fafe5e09f22447bb5520ece1925ba0f0416d33ab98f0488458e0220c182e",
       "recorded_batch_date": "20261103",
       "kind": "redacted historical snapshot import, not an original development commit"
+    },
+    {
+      "batch": "stage-01-static-chat-20261103-02",
+      "source_manifest_sha256": "7e42863108f0953f444eb31f98f984253d247255880293083d1ecb9f268044c3",
+      "recorded_batch_date": "20261103",
+      "kind": "redacted historical snapshot import, not an original development commit"
     }
   ]
 }
