@@ -1,4 +1,5 @@
 import os
+import subprocess
 import time
 from pathlib import Path
 import tkinter as tk
@@ -28,6 +29,10 @@ class Window:
         self.root.geometry(f'+{x}+{y}')
         self.drag=None; self.dialog=None; self.dialog_ids=[]; self.toast_jobs={}; self.seen=set(); self.failed=set(); self.active_events={}
         self.cancel_jobs={}
+        self.cancel_failures={}
+        self.cancel_checked=set()
+        self.refresh_callback=None
+        self.closing=False
         self.hidden=False
         bar=ttk.Frame(self.root); bar.pack(fill='x',padx=10,pady=6)
         grip=ttk.Label(bar,text='⠿ Codex 纯聊天监控',font=('Microsoft YaHei UI',12,'bold')); grip.pack(side='left')
@@ -55,7 +60,7 @@ class Window:
         self.table.bind('<<TreeviewSelect>>',self.show_details)
         self.root.protocol('WM_DELETE_WINDOW',self.hide)
         self.root.bind('<Configure>',self.save_settings)
-        self.root.after(200,self.refresh)
+        self.refresh_callback=self.root.after(200,self.refresh)
 
     def toggle_top(self):
         self.root.attributes('-topmost',self.top.get()); self.save_settings()
@@ -86,15 +91,39 @@ class Window:
         self.hidden=True; self.root.withdraw()
         journal(self.runtime/'ui-events.jsonl',{'event':'hidden','unix':time.time()})
     def quit(self):
-        self.save_settings(); self.service.stop.set()
+        if self.closing:return
+        try:self.save_settings()
+        finally:self.shutdown()
+    def shutdown(self):
+        if self.closing:return
+        self.closing=True
+        self.service.stop.set()
+        if self.refresh_callback:
+            self.root.after_cancel(self.refresh_callback)
+            self.refresh_callback=None
+        try:
+            for job in [*self.toast_jobs.values(),*self.cancel_jobs.values()]:
+                if job.poll() is None:
+                    job.terminate()
+                    try:job.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        job.kill();job.wait(timeout=5)
+        finally:
+            try:
+                close=getattr(self.service,'close',None)
+                if close:close()
+            finally:self.root.destroy()
     def show(self):
         self.hidden=False; self.root.deiconify(); self.root.lift()
     def refresh(self):
+        self.refresh_callback=None
+        try:self.update_view()
+        finally:
+            if not self.closing:
+                self.refresh_callback=self.root.after(300,self.refresh)
+    def update_view(self):
         if self.service.stop.is_set():
-            for job in [*self.toast_jobs.values(),*self.cancel_jobs.values()]:
-                if job.poll() is None:
-                    job.terminate(); job.wait(timeout=5)
-            self.root.destroy(); return
+            self.shutdown(); return
         if (self.runtime/'show.request').exists():
             (self.runtime/'show.request').unlink(); self.show()
         state=load(self.runtime/'state.json',{'chats':{},'outbox':[]})
@@ -106,7 +135,7 @@ class Window:
         self.table.delete(*self.table.get_children())
         for c in rows:self.table.insert('',tk.END,iid=c['id'],values=(c['title']+' · '+c['id'],c['project'],display_chat(c)))
         if selected in self.table.get_children():self.table.selection_set(selected)
-        self.status.configure(text=f"监控 {len(state['chats'])} 个聊天 · 显示 {len(rows)} 个 · 元数据故障 {len(state.get('faults',{}))} · 通知提交失败 {len(self.failed)}")
+        self.status.configure(text=f"监控 {len(state['chats'])} 个聊天 · 显示 {len(rows)} 个 · 元数据故障 {len(state.get('faults',{}))} · 通知提交失败 {len(self.failed)} · 取消失败 {len(self.cancel_failures)}"+(' · 查看日志 ui-events.jsonl' if self.cancel_failures else ''))
         while not self.service.replies.empty():
             reply=self.service.replies.get_nowait()
             if reply['action']=='prepared':self.prepared(reply['path'])
@@ -114,9 +143,18 @@ class Window:
         self.active_events={e['id']:e for e in state['outbox']}
         from .notifications import cancel_toast
         for eid,job in self.toast_jobs.items():
-            if eid not in self.active_events and eid not in self.seen and eid not in self.cancel_jobs:
-                if job.poll() is None:job.terminate();job.wait(timeout=5)
-                self.cancel_jobs[eid]=cancel_toast(eid,self.runtime)
+            if eid not in self.active_events and eid not in self.seen and eid not in self.cancel_jobs and eid not in self.cancel_failures:
+                try:
+                    if job.poll() is None:job.terminate();job.wait(timeout=5)
+                    self.cancel_jobs[eid]=cancel_toast(eid,self.runtime)
+                except (OSError,subprocess.TimeoutExpired) as exc:
+                    self.cancel_failed(eid,str(exc))
+        for eid,job in self.cancel_jobs.items():
+            if eid in self.cancel_checked or job.poll() is None:continue
+            self.cancel_checked.add(eid)
+            receipt=load(self.runtime/'delivery'/f'{eid}.cancel.json',{})
+            if job.returncode!=0 or not receipt.get('removal_submitted'):
+                self.cancel_failed(eid,str(receipt.get('error','cancel helper failed or receipt missing')))
         invalid=set(self.dialog_ids)-set(self.active_events)
         if invalid:
             journal(self.runtime/'ui-events.jsonl',{'event':'confirmation_invalidated','ids':sorted(invalid),'unix':time.time()})
@@ -126,7 +164,10 @@ class Window:
         if not self.hidden:
             x,y=clamp_position(self.root.winfo_x(),self.root.winfo_y(),self.root.winfo_width(),self.root.winfo_height(),self.root.winfo_screenwidth(),self.root.winfo_screenheight())
             if (x,y)!=(self.root.winfo_x(),self.root.winfo_y()):self.root.geometry(f'+{x}+{y}')
-        self.root.after(300,self.refresh)
+    def cancel_failed(self,eid,error):
+        self.cancel_failures[eid]=error
+        journal(self.runtime/'ui-events.jsonl',{'event':'toast_cancel_failed','id':eid,
+            'error':error,'removal_submitted':False,'unix':time.time()})
     def prepared(self,path):
         text=(Path(path)/'launch.txt').read_text(encoding='utf-8')
         self.root.clipboard_clear(); self.root.clipboard_append(text); self.root.update()
