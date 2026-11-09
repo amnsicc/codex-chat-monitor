@@ -1,0 +1,9 @@
+{
+  "sessions_root": "C:/REPLACE_ME/isolated-input",
+  "runtime": "C:/REPLACE_ME/isolated-runtime",
+  "publication_root": "C:/REPLACE_ME/isolated-publications",
+  "allowed_projects": ["C:/REPLACE_ME/source-project"],
+  "budget": 8000,
+  "encoding": "cl100k_base",
+  "reserves": {}
+}
