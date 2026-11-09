@@ -105,6 +105,14 @@ class Service:
         self.stop.set()
         if self.thread: self.thread.join(timeout=30)
         if self.thread and self.thread.is_alive(): raise RuntimeError('worker_did_not_stop')
+        # The GUI may exit immediately after mapping a card. Persist its queued
+        # receipt after joining the worker, so the next launch cannot resend it.
+        while not self.commands.empty():
+            command=self.commands.get_nowait()
+            if command['action']=='ack':
+                self.engine.ack(command['id'],command['receipt'])
+            elif command['action']=='exclude':
+                self.engine.exclude(command['id'],command['value'])
         if self.watcher and self.watcher.poll() is None:
             if os.name=='nt':
                 subprocess.run(['taskkill','/PID',str(self.watcher.pid),'/T','/F'],capture_output=True)

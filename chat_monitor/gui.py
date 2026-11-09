@@ -33,6 +33,8 @@ class Window:
         self.cancel_checked=set()
         self.refresh_callback=None
         self.closing=False
+        self.card=None
+        self.card_events={}
         self.hidden=False
         bar=ttk.Frame(self.root); bar.pack(fill='x',padx=10,pady=6)
         grip=ttk.Label(bar,text='⠿ Codex 纯聊天监控',font=('Microsoft YaHei UI',12,'bold')); grip.pack(side='left')
@@ -102,6 +104,7 @@ class Window:
             self.root.after_cancel(self.refresh_callback)
             self.refresh_callback=None
         try:
+            self.close_cards(reason='shutdown',interaction='automatic')
             for job in [*self.toast_jobs.values(),*self.cancel_jobs.values()]:
                 if job.poll() is None:
                     job.terminate()
@@ -141,6 +144,7 @@ class Window:
             if reply['action']=='prepared':self.prepared(reply['path'])
             else:messagebox.showerror('无法完成',reply.get('error','未知错误'),parent=self.root)
         self.active_events={e['id']:e for e in state['outbox']}
+        self.update_cards(state)
         from .notifications import cancel_toast
         for eid,job in self.toast_jobs.items():
             if eid not in self.active_events and eid not in self.seen and eid not in self.cancel_jobs and eid not in self.cancel_failures:
@@ -173,27 +177,50 @@ class Window:
         self.root.clipboard_clear(); self.root.clipboard_append(text); self.root.update()
         messagebox.showinfo('准备包已固定',f'启动指令已复制。请在同项目新聊天发送。\n{path}\n\n真实跨窗口读取尚需验收。',parent=self.root)
     def deliver(self,events):
-        from .notifications import toast
         for event in events:
             if event['id'] in self.seen or event['id'] in self.failed:continue
             if event['level'] in {'50','75'}:
-                job=self.toast_jobs.get(event['id'])
-                if job is None:
-                    try:self.toast_jobs[event['id']]=toast(event,self.runtime)
-                    except OSError as exc:
-                        self.failed.add(event['id'])
-                        journal(self.runtime/'ui-events.jsonl',{'event':'toast_submission_failed','id':event['id'],'error':str(exc),'unix':time.time()})
-                    continue
-                if job.poll() is None:continue
-                receipt=load(self.runtime/'delivery'/f"{event['id']}.json",{})
-                if job.returncode==0 and receipt.get('submitted'):
-                    self.service.commands.put({'action':'ack','id':event['id'],'receipt':receipt}); self.seen.add(event['id'])
-                else:
-                    # Keep the outbox entry; show explicit failure, avoid a tight retry storm.
-                    self.failed.add(event['id'])
-                    journal(self.runtime/'ui-events.jsonl',{'event':'toast_submission_failed','id':event['id'],'receipt':receipt,'unix':time.time()})
+                self.show_card(event)
                 continue
             self.open_dialog(event)
+    def show_card(self,event):
+        from .cards import ReminderCard
+        if self.card is None:
+            self.card=ReminderCard(self.root,lambda:self.close_cards('user_close','human'))
+        shown=time.time()
+        self.card_events[event['id']]={'event':event,'shown_unix':shown,'deadline_monotonic':time.monotonic()+8}
+        self.card.show([entry['event'] for entry in self.card_events.values()])
+        self.seen.add(event['id'])
+        receipt={'delivery':'application_card_shown','interaction':'automatic',
+                 'confirmed_by_user':False,'shown_unix':shown,'auto_hide_seconds':8}
+        journal(self.runtime/'ui-events.jsonl',{'event':'card_shown','id':event['id'],
+            'chat_id':event['chat_id'],'level':event['level'],**receipt})
+        self.service.commands.put({'action':'ack','id':event['id'],'receipt':receipt})
+
+    def close_cards(self,reason,interaction,ids=None):
+        for eid in list(self.card_events) if ids is None else ids:
+            item=self.card_events.pop(eid,None)
+            if item:
+                journal(self.runtime/'ui-events.jsonl',{'event':'card_hidden','id':eid,
+                    'chat_id':item['event']['chat_id'],'reason':reason,'interaction':interaction,
+                    'confirmed_by_user':False,'shown_unix':item['shown_unix'],'unix':time.time()})
+        if self.card:
+            if self.card_events:
+                self.card.show([entry['event'] for entry in self.card_events.values()])
+            else:
+                self.card.close();self.card=None
+
+    def update_cards(self,state):
+        for eid,item in list(self.card_events.items()):
+            event=item['event'];chat=state['chats'].get(event['chat_id'],{})
+            superseded=any(e['chat_id']==event['chat_id'] and e.get('policy')==event.get('policy')
+                and e['level']!=event['level'] for e in state['outbox'])
+            invalid=chat.get('status') in ('excluded','unverified') or event['chat_id'] in state.get('excluded',[])
+            policy_changed=chat.get('status')=='ready' and chat.get('policy')!=event.get('policy')
+            if invalid or superseded or policy_changed:
+                self.close_cards('invalidated','automatic',[eid])
+            elif time.monotonic()>=item['deadline_monotonic']:
+                self.close_cards('auto_hide','automatic',[eid])
     def open_dialog(self,event):
         if event['id'] in self.dialog_ids:return
         if self.dialog is None:
