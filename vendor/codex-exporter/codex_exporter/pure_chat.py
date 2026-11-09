@@ -15,6 +15,38 @@ TOOLS = {'function_call','function_call_output','custom_tool_call','custom_tool_
          'reasoning','additional_tools'}
 DESKTOP_TOOLS = {'commandexecution','filechange','extension','imageview','mcptoolcall',
                  'websearch','reasoning','plan','collabagenttoolcall'}
+HARNESS_KINDS = {'environments.environment_context','additional_content.codex_apps_open_page'}
+USAGE_COUNTERS = {'input_tokens','cached_input_tokens','cache_write_input_tokens',
+                  'output_tokens','reasoning_output_tokens','total_tokens'}
+
+
+def verified_metadata(obj, audit):
+    """Recognize only the two reviewed real metadata structures, never body text.
+
+    None means another schema. False means a known name with unverified shape.
+    Unknown fields are not silently dropped, including at the outer envelope.
+    """
+    top=obj.get('type');payload=obj.get('payload')
+    if not isinstance(payload,dict):return None
+    configuration=top=='response_item' and payload.get('type')=='configuration_update'
+    usage=top=='token_usage_record'
+    if not configuration and not usage:return None
+    envelope={'type','payload','timestamp','ordinal'}|({'metadata'} if configuration else set())
+    if (set(obj)-envelope or not isinstance(obj.get('timestamp'),str) or not obj['timestamp']
+            or ('ordinal' in obj and (type(obj['ordinal']) is not int or obj['ordinal']<0))):
+        return False
+    if configuration:
+        metadata=obj.get('metadata')
+        return (set(payload)=={'type','reasoning'} and payload['reasoning']=={'effort':'xhigh'}
+            and isinstance(metadata,dict) and set(metadata)=={'client_authored','harness_authored_configuration'}
+            and metadata['client_authored'] is False and metadata['harness_authored_configuration'] is True)
+    identifiers={'thread_id','turn_id','session_id','root_turn_id','response_id'}
+    counters={'usage','turn_token_usage','thread_token_usage'}
+    if set(payload)!=identifiers|counters:return False
+    if not all(isinstance(payload[k],str) and payload[k] for k in identifiers):return False
+    if {payload['thread_id'],payload['session_id']}!=set(audit['session_ids']):return False
+    return all(isinstance(payload[k],dict) and set(payload[k])==USAGE_COUNTERS
+        and all(type(value) is int and value>=0 for value in payload[k].values()) for k in counters)
 
 def issue(audit, seq, reason):
     audit['issues'].append({'line':seq,'reason':reason})
@@ -45,6 +77,11 @@ def select(obj, seq, audit):
     top = obj.get('type')
     payload = obj.get('payload') if isinstance(obj.get('payload'),dict) else {}
     kind = payload.get('type','')
+    metadata_valid=verified_metadata(obj,audit)
+    if metadata_valid is not None:
+        if not metadata_valid:
+            issue(audit,seq,'unverified_metadata_structure');return None,'unverified'
+        return None, 'verified_usage_metadata' if top=='token_usage_record' else 'verified_configuration_metadata'
     if top in {'session_meta','turn_context','world_state','compacted'}:
         return None, 'metadata_or_derived_history'
     if top == 'event_msg' and kind in RUNTIME:
@@ -125,18 +162,40 @@ def select(obj, seq, audit):
             if provenance in {'context','system','developer','host','environment'}:
                 audit['parts_excluded'].append({'line':seq,'position':i,'reason':'host_provenance'})
                 continue
+            if provenance=='harness':
+                # Explicit part/metadata conflicts above must win over exclusion.
+                verified=(not completed and kinds is not None and isinstance(kinds[i],str) and kinds[i] in HARNESS_KINDS
+                    and set(md)=={'provenance'} and set(provenance_data)=={'type','hook'}
+                    and provenance_data['hook'] is False and part_type=='input_text'
+                    and isinstance(part.get('text'),str)
+                    and ('provenance' not in part or isinstance(part['provenance'],dict)
+                        and set(part['provenance'])=={'type','hook'} and part['provenance'].get('hook') is False)
+                    and not set(part)-{'type','text','provenance','truncated','is_truncated'})
+                if not verified:
+                    issue(audit,seq,'unknown_user_content_provenance');continue
+                audit['parts_excluded'].append({'line':seq,'position':i,
+                    'reason':'verified_harness_context','kind':kinds[i]})
+                continue
             if provenance != 'user':
                 issue(audit,seq,'unknown_user_content_provenance'); continue
             if kinds is not None and kinds[i]!='user.text':
                 issue(audit,seq,'user_text_kind_provenance_conflict');continue
         elif role=='user' and 'provenance' in part:
             issue(audit,seq,'unsupported_completed_part_provenance');continue
-        if part_type not in TEXT_TYPES or not isinstance(part.get('text'),str):
+        desktop_text=(completed and item.get('type')=='AgentMessage' and part_type=='Text')
+        if desktop_text and not (isinstance(item.get('id'),str) and item['id']
+                and isinstance(payload.get('turn_id'),str) and payload['turn_id']
+                and item.get('role','assistant')=='assistant'
+                and item.get('turn_id',payload['turn_id'])==payload['turn_id']
+                and metadata.get('turn_id',payload['turn_id'])==payload['turn_id']
+                and ('thread_id' not in payload or payload['thread_id'] in audit['session_ids'])):
+            issue(audit,seq,'unverified_completed_text_identity');continue
+        if (part_type not in TEXT_TYPES and not desktop_text) or not isinstance(part.get('text'),str):
             issue(audit,seq,'unknown_text_part'); continue
         if part.get('truncated') or part.get('is_truncated'):
             issue(audit,seq,'chat_part_truncated')
         # The downstream general-purpose walker must see only the verified field.
-        chosen.append({'type':part_type,'text':part['text']})
+        chosen.append({'type':'text' if desktop_text else part_type,'text':part['text']})
         extra=sorted(set(part)-{'type','text','truncated','is_truncated'})
         if extra:
             audit.setdefault('fields_excluded',[]).append({'line':seq,'position':i,
@@ -161,7 +220,7 @@ def select(obj, seq, audit):
 
 def deduplicate(records, audit):
     """Reuse existing desktop turn projection; only proven IDs authorize merges."""
-    from .material_identity import match_unique_real_user_turn
+    from .material_identity import match_unique_real_user_turn, merge_locations
     # Native ID namespaces differ for response items and desktop user items.
     out, identities = [], {}
     for rec in records:
@@ -175,9 +234,10 @@ def deduplicate(records, audit):
             if previous.text != rec.text:
                 audit['uncertainties'].append({'reason':'identity_content_conflict','refs':rec.source_refs})
             elif cross_source or cross_form:
+                locations=merge_locations(previous,rec)
                 previous.source_refs.extend(rec.source_refs)
                 audit['merges'].append({'reason':'verified_message_identity','id':rec.message_id,
-                                       'refs':rec.source_refs})
+                                       'refs':deepcopy(rec.source_refs),**locations})
                 continue
             else:
                 audit['uncertainties'].append({'reason':'same_identity_replay','refs':rec.source_refs})

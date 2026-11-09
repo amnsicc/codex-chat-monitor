@@ -4,8 +4,19 @@ This consumes already-classified exporter records. It does not parse JSONL,
 render content, infer identities from text, or change the streaming path.
 """
 import hashlib
+from copy import deepcopy
 
 PATCH_ID = 'material-identity-real-schema-20261102-01'
+
+
+def merge_locations(kept, merged):
+    """Filtered record sequence is not a physical JSONL line number.
+
+    Snapshot each side before references are combined, with source path, physical
+    line, line hash and original field positions supplied by the pure-chat caller.
+    """
+    return {'kept_record_seq':kept.seq,'merged_record_seq':merged.seq,
+            'kept_refs':deepcopy(kept.source_refs),'merged_refs':deepcopy(merged.source_refs)}
 
 def annotate(rec, obj, seq, schema, turn_id, line):
     payload = obj.get('payload') if isinstance(obj.get('payload'), dict) else {}
@@ -58,10 +69,11 @@ def deduplicate(records, audit):
                           or rec.event_family in mirror_families and 'response_item' in families)
             if (cross_form and rec.event_family not in families and len(families) == 1
                     and rec.turn_id == prev.turn_id and rec.text == prev.text):
+                locations=merge_locations(prev,rec)
                 prev.source_refs.extend(rec.source_refs)
                 audit['merges'].append({'reason': 'explicit_message_identity_across_representations',
                     'message_id': rec.message_id, 'turn_id': rec.turn_id,
-                    'kept_line': prev.seq, 'merged_line': rec.seq})
+                    **locations})
                 paired = True
                 break
         if paired:
@@ -130,11 +142,12 @@ def match_unique_real_user_turn(records, audit):
         retained, completed = group['retained_user_text'], group['completed_user_item']
         if len(retained) == len(completed) == 1 and retained[0].text == completed[0].text:
             canonical, item = retained[0], completed[0]
+            locations=merge_locations(canonical,item)
             canonical.source_refs.extend(item.source_refs)
             suppressed.add(item.seq)
             audit['merges'].append({'reason': 'desktop_unique_user_turn_projection',
                 'identity_relation': 'different ID namespaces; selected by explicit representation policy',
-                'turn_id': turn, 'kept_line': canonical.seq, 'merged_line': item.seq,
+                'turn_id': turn, **locations,
                 'retained_id': canonical.message_id, 'completed_item_id': item.message_id})
         elif retained and completed:
             audit['uncertainties'].append({'reason': 'ambiguous_desktop_user_turn_projection',

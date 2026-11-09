@@ -58,6 +58,12 @@
       "source_manifest_sha256": "a03a33675430938119b270a33eddd371bdcdb7eb853bcac6ee90b0bc6c6adc5f",
       "recorded_batch_date": "20261109",
       "kind": "redacted historical snapshot import, not an original development commit"
+    },
+    {
+      "batch": "stage-35a-real-static-20261109-02",
+      "source_manifest_sha256": "bd2245151e25014c56e33d03da04479a5afaf374d773ca1ccb5a692e27f24886",
+      "recorded_batch_date": "20261109",
+      "kind": "redacted historical snapshot import, not an original development commit"
     }
   ]
 }
