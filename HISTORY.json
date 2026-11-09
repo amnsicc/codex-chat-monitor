@@ -76,6 +76,12 @@
       "source_manifest_sha256": "238562b805ebbaa67eecdb84f9e9722ce15d2f5a57b8f08e5758ca1272949a6c",
       "recorded_batch_date": "20261109",
       "kind": "redacted historical snapshot import, not an original development commit"
+    },
+    {
+      "batch": "stage-35b-real-chat-trial-20261109-02",
+      "source_manifest_sha256": "2d0fd1eb147c065abf9bbdb439ad8587c112bf7bcc15e54d80f8bec328603463",
+      "recorded_batch_date": "20261109",
+      "kind": "redacted historical snapshot import, not an original development commit"
     }
   ]
 }

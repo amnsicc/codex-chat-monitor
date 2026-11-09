@@ -16,6 +16,9 @@ class Engine:
         self.config=dict(config)
         self.input=Path(config['sessions_root']).resolve()
         self.runtime=Path(config['runtime']).resolve()
+        self.publication_root=Path(config['publication_root']).resolve() if config.get('publication_root') else None
+        if self.publication_root and self.publication_root.is_relative_to(self.input):
+            raise ValueError('publication_root_must_be_outside_input')
         self.allowed={os.path.normcase(str(Path(p).resolve())) for p in config['allowed_projects']}
         if not self.input.is_dir() or not self.allowed: raise ValueError('explicit_input_and_projects_required')
         if self.runtime.is_relative_to(self.input): raise ValueError('runtime_must_be_outside_input')
@@ -26,6 +29,7 @@ class Engine:
         self.db=load(self.runtime/'state.json',{'chats':{},'notifications':{},'outbox':[],
             'excluded':[],'history':{},'faults':{},'source_issues':{}})
         scope={'sessions_root':os.path.normcase(str(self.input)),'allowed_projects':sorted(self.allowed)}
+        if self.publication_root:scope['publication_root']=os.path.normcase(str(self.publication_root))
         if self.db.get('scope',scope)!=scope: raise ValueError('runtime_input_scope_changed; use a separate runtime')
         self.db['scope']=scope
         self.chats=self.db['chats']
@@ -157,7 +161,7 @@ class Engine:
                     self.notify(cid,None,str(issues[0].get('reason','source_unverified')))
                     journal(self.runtime/'audit.jsonl',{'id':cid,'issues':issues,'unix':time.time()})
                     continue
-                base=Path(result.project)/'.codex-chat-monitor'/cid/'latest'
+                base=(self.publication_root if self.publication_root else Path(result.project)/'.codex-chat-monitor')/cid/'latest'
                 body=result.text.encode('utf-8')
                 body_hash=hashlib.sha256(body).hexdigest()
                 target=base/('material-'+body_hash+'.md')
