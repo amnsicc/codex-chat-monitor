@@ -29,6 +29,9 @@ class Engine:
         if self.db.get('scope',scope)!=scope: raise ValueError('runtime_input_scope_changed; use a separate runtime')
         self.db['scope']=scope
         self.chats=self.db['chats']
+        self.observed=self.db.setdefault('observed_sources', {
+            cid:{path:{'project':self.chats[cid]['project']} for path in history}
+            for cid,history in self.db['history'].items()})
         self.known=discovery.inventory(self.input)  # baseline only; does not open bodies
         self.pending=set(self.chats)-set(self.db['excluded'])
         self.catalog={}
@@ -39,6 +42,7 @@ class Engine:
             journal(self.runtime/'policy.jsonl',{'old':previous_policy,'new':self.policy,'budget':self.config['budget'],'encoding':self.config['encoding'],'calibrated':False,'unix':time.time()})
         self.db['policy']=self.policy
         self.db['outbox']=[e for e in self.db['outbox'] if e.get('policy')==self.policy or e['level']=='error']
+        self.cancel_excluded_alerts()
         self.save()
 
     def save(self):
@@ -53,32 +57,39 @@ class Engine:
             try:
                 h=discovery.header(path); self.catalog[path]=h
                 self.db['faults'].pop(path,None)
-                for owner,history in self.db['history'].items():
+                for owner,history in self.observed.items():
                     if path in history and h['id']!=owner:
-                        self.pending.add(owner)
-                        self.invalidate(owner,'unverified',[{'reason':'source_identity_changed','path':path}])
+                        if owner not in self.db['excluded']:
+                            self.pending.add(owner)
+                            self.invalidate(owner,'unverified',[{'reason':'source_identity_changed','path':path}])
                         self.catalog.pop(path,None)
                 if h['internal']: continue
                 cid=h['id']
                 if cid not in self.chats:
                     self.chats[cid]={'id':cid,'title':h['title'],'project':h['project'],
                         'status':'processing','activity':'','issues':[]}
+                self.observe_source(cid,path,h)
                 if cid not in self.db['excluded']:
                     self.pending.add(cid)
                     self.invalidate(cid,'processing',[])
             except (ValueError,OSError,UnicodeError) as exc:
                 self.catalog.pop(path,None)
                 self.db['faults'][path]=str(exc)
-                # A formerly adopted file losing identity must invalidate that chat.
-                for cid,history in self.db['history'].items():
+                candidate=getattr(exc,'session_id',None)
+                if candidate in self.chats:
+                    self.observe_source(candidate,path,{'project':None})
+                # Observed but unverified pages must retain their ownership too.
+                for cid,history in self.observed.items():
                     if path in history:
-                        self.pending.add(cid)
-                        self.invalidate(cid,'unverified',[{'reason':'source_header_changed','path':path}])
+                        if cid not in self.db['excluded']:
+                            self.pending.add(cid)
+                            self.invalidate(cid,'unverified',[{'reason':'source_header_changed','path':path}])
         for path in missing:
-            for cid,history in self.db['history'].items():
+            for cid,history in self.observed.items():
                 if path in history:
-                    self.pending.add(cid)
-                    self.invalidate(cid,'unverified',[{'reason':'source_missing','path':path}])
+                    if cid not in self.db['excluded']:
+                        self.pending.add(cid)
+                        self.invalidate(cid,'unverified',[{'reason':'source_missing','path':path}])
         self.known=current
         if changes or missing: self.save()
 
@@ -91,14 +102,27 @@ class Engine:
         chat.update(status=status,issues=issues,budget_label='无法判断' if status=='unverified' else status)
         self.chats[cid]=chat
 
+    def observe_source(self,cid,path,header):
+        sources=self.observed.setdefault(cid,{})
+        if path not in sources:
+            sources[path]={'project':header['project']}
+            journal(self.runtime/'sources.jsonl',{'event':'observed','id':cid,
+                'path':path,'project':header['project'],'unix':time.time()})
+
     def related(self,cid):
         # Only metadata heads of other logs are read to locate all pages of this ID.
         for path in self.known:
             if path not in self.catalog:
                 try: self.catalog[path]=discovery.header(path)
-                except (ValueError,OSError,UnicodeError): continue
-        return [Path(p) for p in self.known if self.catalog.get(p,{}).get('id')==cid
+                except (ValueError,OSError,UnicodeError) as exc:
+                    if getattr(exc,'session_id',None)==cid:
+                        self.observe_source(cid,path,{'project':None})
+                    continue
+        paths=[Path(p) for p in self.known if self.catalog.get(p,{}).get('id')==cid
                 and not self.catalog[p]['internal']]
+        for path in paths: self.observe_source(cid,str(path),self.catalog[str(path)])
+        self.save()
+        return paths
 
     def process_pending(self):
         for cid in sorted(self.pending.copy()):
@@ -109,7 +133,7 @@ class Engine:
             journal(self.runtime/'schedule.jsonl',{'event':'start','id':cid,'unix':started})
             try:
                 paths=self.related(cid)
-                missing=set(self.db['history'].get(cid,{}))-{str(p) for p in paths}
+                missing=set(self.observed.get(cid,{}))-{str(p) for p in paths}
                 if missing: raise ValueError('source_missing_or_identity_changed: '+', '.join(sorted(missing)))
                 if not paths: raise ValueError('no_recoverable_sources')
                 signatures={str(p):discovery.signature(p) for p in paths}
@@ -170,6 +194,11 @@ class Engine:
                     'elapsed_ms':(time.time()-started)*1000,'status':self.chats[cid]['status']})
 
     def notify(self,cid,tokens,problem=None):
+        previous=self.db['notifications'].get(cid,{})
+        if tokens is not None and previous.get('faults'):
+            journal(self.runtime/'alerts.jsonl',{'event':'recovered','chat_id':cid,
+                'faults':previous['faults'],'cutoff':self.chats[cid].get('cutoff'),
+                'sha256':self.chats[cid].get('sha256'),'unix':time.time()})
         state,event=transition(self.db['notifications'].get(cid,{}),tokens,self.policy,self.config['budget'],problem)
         self.db['notifications'][cid]=state
         if event:
@@ -183,7 +212,17 @@ class Engine:
             self.db['outbox'].append(event)
             journal(self.runtime/'alerts.jsonl',{'event':'queued',**event})
 
+    def cancel_excluded_alerts(self):
+        cancelled=[event for event in self.db['outbox'] if event['chat_id'] in self.db['excluded']]
+        for event in cancelled:
+            journal(self.runtime/'alerts.jsonl',{'event':'cancelled','id':event['id'],
+                'chat_id':event['chat_id'],'reason':'chat_excluded','unix':time.time()})
+        if cancelled:
+            self.db['outbox']=[event for event in self.db['outbox'] if event not in cancelled]
+            self.save()
+
     def outbox(self):
+        self.cancel_excluded_alerts()
         return list(self.db['outbox'])
 
     def ack(self,event_id,receipt):
@@ -199,4 +238,6 @@ class Engine:
             values.add(cid); self.pending.discard(cid); self.invalidate(cid,'excluded',[])
         else:
             values.discard(cid); self.pending.add(cid); self.invalidate(cid,'processing',[])
-        self.db['excluded']=sorted(values); self.save()
+        self.db['excluded']=sorted(values)
+        self.cancel_excluded_alerts()
+        self.save()

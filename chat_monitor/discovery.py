@@ -4,6 +4,11 @@ import os
 import re
 from pathlib import Path
 
+class UnverifiedHeader(ValueError):
+    def __init__(self, reason, session_id):
+        super().__init__(reason)
+        self.session_id = session_id
+
 def signature(path):
     stat=path.stat()
     return [stat.st_size,stat.st_mtime_ns,stat.st_ino]
@@ -26,8 +31,9 @@ def header(path):
     internal=(isinstance(source,dict) and 'subagent' in source or
               isinstance(source,str) and source.lower().startswith('subagent'))
     if not internal and source not in ('cli','vscode','exec','app','appServer','app-server'):
-        raise ValueError('unknown_session_source')
+        raise UnverifiedHeader('unknown_session_source', cid)
     cwd=payload.get('cwd')
-    if not isinstance(cwd,str) or not Path(cwd).is_absolute(): raise ValueError('project_not_absolute')
+    if not isinstance(cwd,str) or not Path(cwd).is_absolute():
+        raise UnverifiedHeader('project_not_absolute', cid)
     return {'id':cid,'project':os.path.normcase(str(Path(cwd).resolve())),
             'internal':bool(internal),'title':payload.get('title') or cid[:12]}
