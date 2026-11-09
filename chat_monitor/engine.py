@@ -226,11 +226,15 @@ class Engine:
         return list(self.db['outbox'])
 
     def ack(self,event_id,receipt):
-        event=next(e for e in self.db['outbox'] if e['id']==event_id)
+        event=next((e for e in self.outbox() if e['id']==event_id),None)
+        if event is None:
+            journal(self.runtime/'alerts.jsonl',{'event':'ack_ignored','id':event_id,'reason':'inactive_event','unix':time.time()})
+            return False
         self.db['outbox']=[e for e in self.db['outbox'] if e['id']!=event_id]
         journal(self.runtime/'alerts.jsonl',{'event':'delivered','id':event_id,'chat_id':event['chat_id'],
             'receipt':receipt,'unix':time.time()})
         self.save()
+        return True
 
     def exclude(self,cid,excluded):
         values=set(self.db['excluded'])

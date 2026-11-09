@@ -18,7 +18,14 @@ def main():
         dump(command,{"action":"exclude","id":args.exclude or args.restore,"value":bool(args.exclude)})
         print(command)
         return
-    service=Service(load(args.config),headless=args.headless)
+    try:
+        service=Service(load(args.config),headless=args.headless)
+    except RuntimeError as exc:
+        if str(exc)!='monitor_already_running_for_runtime': raise
+        runtime=Path(load(args.config)['runtime'])
+        (runtime/'show.request').touch()
+        print('已有运行实例，已请求恢复窗口')
+        return
     try:
         service.start()
         if args.headless:

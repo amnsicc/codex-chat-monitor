@@ -9,6 +9,8 @@ try {
     $body=[System.Security.SecurityElement]::Escape($payload.body)
     $xml.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$title</text><text>$body</text></binding></visual></toast>")
     $notification=[Windows.UI.Notifications.ToastNotification]::new($xml)
+    $notification.Tag=$payload.tag
+    $notification.Group='CodexChatMonitor'
     $notifier=[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Microsoft.Windows.PowerShell')
     $notifier.Show($notification)
     @{submitted=$true;method='Windows.UI.Notifications.ToastNotificationManager.Show';setting=[string]$notifier.Setting;pixel_verified=$false;utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath $ReceiptFile -Encoding UTF8
