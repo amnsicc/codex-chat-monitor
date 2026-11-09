@@ -1,0 +1,15 @@
+{
+  "history_type": "reconstructed_from_local_freezes",
+  "original_git_history_available": false,
+  "author_and_committer": "snapshot-import@invalid (unlinked archive identity)",
+  "commit_dates": "actual import times; no fabricated/backdated original Git commits",
+  "snapshot_dates": "taken from source batch labels; not exact development commit times",
+  "versions": [
+    {
+      "batch": "stage-01-static-chat-20261103",
+      "source_manifest_sha256": "9c83fafe5e09f22447bb5520ece1925ba0f0416d33ab98f0488458e0220c182e",
+      "recorded_batch_date": "20261103",
+      "kind": "redacted historical snapshot import, not an original development commit"
+    }
+  ]
+}
