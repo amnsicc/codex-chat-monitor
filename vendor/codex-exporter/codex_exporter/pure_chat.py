@@ -37,7 +37,10 @@ def verified_metadata(obj, audit):
         return False
     if configuration:
         metadata=obj.get('metadata')
-        return (set(payload)=={'type','reasoning'} and payload['reasoning']=={'effort':'xhigh'}
+        reasoning=payload.get('reasoning')
+        return (set(payload)=={'type','reasoning'} and isinstance(reasoning,dict)
+            and set(reasoning)=={'effort'} and isinstance(reasoning['effort'],str)
+            and reasoning['effort'] in {'xhigh','medium'}
             and isinstance(metadata,dict) and set(metadata)=={'client_authored','harness_authored_configuration'}
             and metadata['client_authored'] is False and metadata['harness_authored_configuration'] is True)
     identifiers={'thread_id','turn_id','session_id','root_turn_id','response_id'}

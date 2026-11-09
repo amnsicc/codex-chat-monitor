@@ -70,6 +70,12 @@
       "source_manifest_sha256": "d9da4007095f6692b9d5a4738a425adde083053abb999f7cafb62e193cec4011",
       "recorded_batch_date": "20261109",
       "kind": "redacted historical snapshot import, not an original development commit"
+    },
+    {
+      "batch": "stage-35b-medium-compat-20261109-01",
+      "source_manifest_sha256": "238562b805ebbaa67eecdb84f9e9722ce15d2f5a57b8f08e5758ca1272949a6c",
+      "recorded_batch_date": "20261109",
+      "kind": "redacted historical snapshot import, not an original development commit"
     }
   ]
 }
