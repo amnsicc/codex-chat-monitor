@@ -2,7 +2,7 @@
 
 Windows 上的本地试用工具：从明确指定的 Codex JSONL 来源提取用户原话和可见助手回复，核对来源、身份、顺序及镜像，对同一份 UTF-8 正文做全文 token 计数，并显示悬浮窗及预算提醒。
 
-**状态：实验版本。阶段3与有限3.5A已有本地独立验收，3.5B真实试用已完成但尚未放行。已知问题：有效计数恢复后，旧异常提醒可能仍显示并要求确认。真实模型窗口与材料预算未校准。**
+**状态：实验版本。阶段3及有限3.5A/3.5B已有本地独立验收；B35-LIVE-01恢复后旧错误提醒问题已关闭。本仓库另包含尚待独立验收的C1离线保守材料入口；未接入GUI/实时监控、未部署。实际模型预算与tokenizer未校准。**
 
 ## 能力和边界
 
@@ -10,7 +10,7 @@ Windows 上的本地试用工具：从明确指定的 Codex JSONL 来源提取�
 - 同一最终 bytes 的 SHA-256、Unicode码点和 `cl100k_base` 全文计数。未知来源、格式、身份或排序报告未核实。
 - 多聊天发现、串行调度、排除恢复及提醒状态持久化。默认显示最近5个聊天。
 - 50%/75%程序自有非激活提示卡，90%/超限需要确认；人工预算等号显示已到上限，不增加第五档。
-- 不读取模型真实上下文占用，不承诺原生tokenizer兼容或安全容量；`.jsonl.zst`、真实DPI/登录自启动等边界尚未完成。
+- 不读取模型真实上下文占用，不承诺原生tokenizer兼容或安全容量；C1离线入口可显式使用已有Python 3.14标准库解压`.jsonl.zst`，这不代表实时监控已支持压缩日志；真实DPI/登录自启动等边界仍未完成。
 - 准备包/迁移入口仍受阶段门禁限制，GUI按钮禁用；仓库包含历史草稿模块，不代表已获准用于迁移。
 
 ## 本地运行
@@ -57,3 +57,18 @@ python -m venv .venv
 仅公开仓库不自动赋予本项目自有代码新许可证；此导入未替作者选择额外开源许可。各第三方组件继续适用其自身许可证。
 
 不要将真实日志、材料、截图、密钥、cookie或本机配置加入本仓库。公开导出保留所有本地冻结原件，不覆盖开发主工程。
+
+## C1 offline conservative material (development candidate)
+
+`python -B -m chat_monitor.conservative --spec /absolute/spec.json --output /new/output --zstd-python /existing/python3.14`
+
+The spec declares source_id, project, and sources (absolute path, expected bytes,
+SHA-256). The output directory must not exist. The helper is explicit and does
+not install dependencies or discover live chats. See [the contract](CONSERVATIVE-CONTRACT.md).
+Strict completeness, source gaps, candidate uncertainty and full-file counts are
+separate. This candidate has not undergone independent C1 acceptance or model
+distillation evaluation. Private source samples and their results are not published.
+
+The new synthetic compression test requires `C1_ZSTD_PYTHON` pointing to an
+existing Python 3.14 executable; otherwise that test is explicitly skipped.
+No C2/C3 rollout or stage-4 migration is enabled by this code publication.

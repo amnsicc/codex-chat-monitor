@@ -1,0 +1,10 @@
+{
+  "published_scope": "code, synthetic tests, public contracts and status only",
+  "accepted_repair": "B35-LIVE-01 limited independent acceptance retained",
+  "conservative_entry": "C1 development candidate; independent acceptance pending",
+  "model_quality_evaluations": 0,
+  "private_samples_in_repository": false,
+  "local_batch_manifest_sha256": "e678470a9ac310ef62363143594447f6dcd8c1524d4d6f178ee8f10ff7f60e00",
+  "public_test_adjustment": "C1_ZSTD_PYTHON replaces a workstation-specific test helper path; explicit skip if unset",
+  "historical_commits_rewritten": false
+}

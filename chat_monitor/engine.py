@@ -199,6 +199,8 @@ class Engine:
 
     def notify(self,cid,tokens,problem=None):
         previous=self.db['notifications'].get(cid,{})
+        if tokens is not None and self.chats[cid].get('status')=='ready':
+            self.resolve_errors(cid)
         if tokens is not None and previous.get('faults'):
             journal(self.runtime/'alerts.jsonl',{'event':'recovered','chat_id':cid,
                 'faults':previous['faults'],'cutoff':self.chats[cid].get('cutoff'),
@@ -215,6 +217,22 @@ class Engine:
                 self.db['outbox']=[e for e in self.db['outbox'] if e not in superseded]
             self.db['outbox'].append(event)
             journal(self.runtime/'alerts.jsonl',{'event':'queued',**event})
+
+    def resolve_errors(self,cid):
+        """A verified full publication resolves only this chat's active errors.
+
+        Keep the historical queue/recovery records. Never acknowledge on behalf
+        of a person, reset tiers, or remove another chat's error/budget event.
+        Also covers legacy queues whose fault-dedup state was already cleared.
+        """
+        resolved=[e for e in self.db['outbox'] if e['chat_id']==cid and e['level']=='error']
+        for event in resolved:
+            journal(self.runtime/'alerts.jsonl',{'event':'error_resolved','id':event['id'],
+                'chat_id':cid,'reason':'verified_recovery','fault_reason':event.get('reason'),
+                'sha256':self.chats[cid].get('sha256'),'cutoff':self.chats[cid].get('cutoff'),
+                'unix':time.time()})
+        resolved_ids={e['id'] for e in resolved}
+        self.db['outbox']=[e for e in self.db['outbox'] if e['id'] not in resolved_ids]
 
     def cancel_excluded_alerts(self):
         cancelled=[event for event in self.db['outbox'] if event['chat_id'] in self.db['excluded']]

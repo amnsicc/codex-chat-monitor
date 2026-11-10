@@ -1,25 +1,26 @@
-# Known issues and acceptance scope
+# Status and verification scope
 
-## B35-LIVE-01 — recovered error remains active
+## B35-LIVE-01
 
-When an input changes during counting, the engine correctly rejects the unstable
-measurement and publishes a verified retry. However, the old error event may
-remain queued and be shown after recovery, asking a user to acknowledge a stale
-fault. Observed twice during the designated real-chat trial. It remains unfixed
-in this snapshot. Successful text/count checks do not close this issue.
+The recovered-error lifecycle repair was independently accepted locally on
+2026-11-10. A fully verified recovery retires stale errors for that chat; partial
+recovery preserves errors. Budget histories, other chats and stale acknowledgements
+retain their existing behavior. Private evidence and receipts are not public.
 
-A future fix must preserve real unresolved errors, per-policy budget tier
-history, persistent deduplication, recovery/re-fault semantics and safe late
-acknowledgements. Do not force complete=true or suppress all source-change errors.
+## C1 offline material
 
-## Evidence scope
+The additive conservative entry point is a development candidate awaiting
+independent acceptance. It can retain ambiguous text and projected JSON with
+provenance while leaving strict-complete semantics intact. Some preserved JSON
+contains timestamps, completion status, or empty lists. Their removal has only
+been volume-modelled locally; no such filter is implemented here. Model reading
+or distillation quality has not been measured against an original-chat baseline.
 
-Stages 1–3 and limited 3.5A have local acceptance records; those records and real
-chat data stay private. Stage 3.5B has development/trial evidence, not final
-independent release approval. Human 90/over acknowledgement evidence exists
-locally. 50/75 cards have user-reported observation without target screenshots.
+## Remaining scope
 
-Exact budget equality, several live cancellation/exclusion/hidden-window cases,
-additional real chats, zstd cold logs, actual DPI changes/login startup and target
-context budget calibration were not all revalidated in this trial. No stage-4
-preparation/migration development is implied by publishing this repository.
+The target native tokenizer and effective budget are uncalibrated. GUI/worker
+integration of conservative mode, full real-schema coverage, actual DPI/login
+startup and model-based migration remain outside this publication. Offline zstd
+support via an explicitly supplied existing Python 3.14 helper is not realtime
+zstd monitoring support. Existing private real trials prove only their stated
+limited scope, not general completeness or losslessness.
